@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -29,11 +30,15 @@ import (
 
 // SideCar is a metadata storer that uses sidecar files to store metadata.
 type SideCar struct {
-	dir string
+	dir      string
+	filePerm fs.FileMode
 }
 
 const (
 	sidecarmeta = "meta"
+
+	// defaultFilePerm matches the posix backend default for new object files
+	defaultFilePerm fs.FileMode = 0644
 )
 
 // NewSideCar creates a new SideCar metadata storer.
@@ -46,7 +51,15 @@ func NewSideCar(dir string) (SideCar, error) {
 		return SideCar{}, fmt.Errorf("not a directory")
 	}
 
-	return SideCar{dir: dir}, nil
+	return SideCar{dir: dir, filePerm: defaultFilePerm}, nil
+}
+
+// WithFilePerm returns a copy of the SideCar that creates attribute files with
+// perm. Like new object files in the posix backend, the mode is applied
+// explicitly and is not reduced by the process umask.
+func (s SideCar) WithFilePerm(perm fs.FileMode) SideCar {
+	s.filePerm = perm.Perm()
+	return s
 }
 
 // maxMetaDirRetries bounds how many times StoreAttribute makes the metadata
@@ -115,6 +128,12 @@ func (s SideCar) StoreAttribute(_ *os.File, bucket, object, attribute string, va
 			return s3err.GetAPIError(s3err.ErrNoSpaceLeftOnDevice)
 		}
 		return fmt.Errorf("failed to write attribute: %w", err)
+	}
+
+	// os.CreateTemp always creates the file 0600
+	if err = tempfile.Chmod(s.filePerm); err != nil {
+		tempfile.Close()
+		return fmt.Errorf("failed to set attribute file mode: %w", err)
 	}
 
 	// Close explicitly before rename to prevent error on Windows:

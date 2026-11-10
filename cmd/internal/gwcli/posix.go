@@ -243,7 +243,7 @@ func runPosix(ctx *cli.Context) error {
 		if err != nil {
 			return fmt.Errorf("failed to init sidecar metadata: %w", err)
 		}
-		ms = sc
+		ms = sc.WithFilePerm(fs.FileMode(filePerms))
 		opts.SideCarDir = sidecar
 	case nometa:
 		ms = meta.NoMeta{}
